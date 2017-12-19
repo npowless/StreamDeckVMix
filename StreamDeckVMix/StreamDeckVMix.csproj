@@ -85,6 +85,7 @@
     <Content Include="bin\Release\icons\record_on.png" />
     <Content Include="bin\Release\icons\stream_off.png" />
     <Content Include="bin\Release\icons\stream_on.png" />
+    <Content Include="bin\Release\StreamDeckSharp.dll" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
