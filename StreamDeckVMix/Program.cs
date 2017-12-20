@@ -1,14 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Net;
-using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
 using StreamDeckSharp;
-
+using System.Windows.Forms;
+using System.Reflection;
+using System.IO;
+using System.Drawing;
+using System.Runtime.InteropServices;
+using System.Diagnostics;
 
 namespace StreamDeckVMix
 {
@@ -27,24 +27,68 @@ namespace StreamDeckVMix
 
         static vMixWebClient WebClient = new vMixWebClient(URL);
 
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern IntPtr SetParent(IntPtr hWndChild, IntPtr hWndNewParent);
+
+        [DllImport("user32.dll")]
+        static extern IntPtr GetShellWindow();
+
+        [DllImport("user32.dll")]
+        static extern IntPtr GetDesktopWindow();
+
+        static NotifyIcon notifyIcon;
+        static IntPtr processHandle;
+        static IntPtr WinShell;
+        static IntPtr WinDesktop;
+        static MenuItem HideMenu;
+        static MenuItem RestoreMenu;
+
         static void Main(string[] args)
         {
-            /////////////////////////
-            //   -key locations-   //
-            //    4  3  2  1  0    //
-            //    9  8  7  6  5    //
-            //   14 13 12 11 10    //
-            /////////////////////////
+            Assembly currentAssembly = Assembly.GetExecutingAssembly();
+            Stream IconResourceStream = currentAssembly.GetManifestResourceStream("StreamDeckVMix.StreamDeckVMix.ico");
             
-            Console.CancelKeyPress += Console_CancelKeyPress;
-            
+            notifyIcon = new NotifyIcon();            
+            notifyIcon.Icon = new System.Drawing.Icon(IconResourceStream);
+            notifyIcon.Text = "StreamDeck vMix Console";
+            notifyIcon.Visible = true;
 
+            ContextMenu menu = new ContextMenu();
+            HideMenu = new MenuItem("Hide Console", new EventHandler(Minimize_Click));
+            RestoreMenu = new MenuItem("Show Console", new EventHandler(Maximize_Click));
+
+            menu.MenuItems.Add(RestoreMenu);
+            menu.MenuItems.Add(HideMenu);
+            menu.MenuItems.Add(new MenuItem("Exit", new EventHandler(CleanExit)));
+
+            notifyIcon.ContextMenu = menu;
+            notifyIcon.DoubleClick += new System.EventHandler(Maximize_Click); //also show on double click
+
+            Task.Factory.StartNew(Run);
+
+            processHandle = Process.GetCurrentProcess().MainWindowHandle;
+
+            WinShell = GetShellWindow();
+            WinDesktop = GetDesktopWindow();
+            //Hide the Window
+            ResizeWindow(false);
+            Application.Run();
+        }
+
+        static void Run()
+        {
             using (var deck = StreamDeck.FromHID())
             {
                 deck.SetBrightness(100);
 
-                Console.WriteLine("Loading Keys...");
+                /////////////////////////
+                //   -key locations-   //
+                //    4  3  2  1  0    //
+                //    9  8  7  6  5    //
+                //   14 13 12 11 10    //
+                /////////////////////////
 
+                Console.WriteLine("Loading Keys...");
 
                 Keys.Add(new KeyList { KeyName = "Preview 1", KeyType = KEY_PREVIEW, Loc = 14, IconDisabled = "icons\\1_grey.png", IconEnabled = "icons\\1_green.png", Input = 1 });
                 Keys.Add(new KeyList { KeyName = "Preview 2", KeyType = KEY_PREVIEW, Loc = 13, IconDisabled = "icons\\2_grey.png", IconEnabled = "icons\\2_green.png", Input = 2 });
@@ -73,21 +117,40 @@ namespace StreamDeckVMix
                     //combined += thing.Name;
                     deck.SetKeyBitmap(KeyInit.Loc, StreamDeckKeyBitmap.FromFile(KeyInit.IconDisabled));
                 }
-                UpdateKeyStatus(deck, true);  //first update
-                Console.WriteLine("Connected.  Update key status.");
-                deck.KeyPressed += Deck_KeyPressed;
-                exitSignal.WaitOne();
+                Boolean status = UpdateKeyStatus(deck, true);  //first update
+                if (status)
+                {
+                    Console.WriteLine("Connected.  Performing initial key status update.");
+                    Console.WriteLine("Waiting for input.");
+                }
+                else
+                {
+                    Console.WriteLine("vMix Connection Error, retrying....");
+                    while (status == false)
+                    {
+                        status = UpdateKeyStatus(deck, true);
+                    }
+                    Console.WriteLine("Connected to vMix.  Waiting for key input.");
+                }
+
+                deck.KeyPressed += Deck_KeyPressed; //listen for keypresses
+
+                while (true)
+                {
+                    Thread.Sleep(2000);  //two second update to check for changes not triggered by a keypress
+                    UpdateKeyStatus(deck);
+                }
             }
         }
-
-        private static void UpdateKeyStatus(object sender, Boolean init = false)
+ 
+        private static Boolean UpdateKeyStatus(object sender, Boolean init = false)
         {
             var d = sender as IStreamDeck;
-            if (d == null) return;
+            if (d == null) return false;
             if (WebClient.GetStatus()==false)
             {
                 Console.WriteLine("vMix Connection Failed.");
-                return;
+                return false;
             }
             
             //first time, update key status
@@ -159,7 +222,7 @@ namespace StreamDeckVMix
             {
                 d.SetKeyBitmap(Keys[StreamKey_Index].Loc, StreamDeckKeyBitmap.FromFile(Keys[StreamKey_Index].IconDisabled));
             }
-
+            return true;
         }
 
         private static void Deck_KeyPressed(object sender, StreamDeckKeyEventArgs e)
@@ -220,16 +283,55 @@ namespace StreamDeckVMix
                 }
             }
         }
-
-
-
+        
         private static void Console_CancelKeyPress(object sender, ConsoleCancelEventArgs e)
         {
             exitSignal.Set();
             e.Cancel = true;
         }
+
+        private static void CleanExit(object sender, EventArgs e)
+        {
+            using (var deck = StreamDeck.FromHID())
+            {
+                deck.ClearKeys();
+            }
+            notifyIcon.Visible = false;
+            Application.Exit();
+            Environment.Exit(1);
+        }
+
+
+        static void Minimize_Click(object sender, EventArgs e)
+        {
+            ResizeWindow(false);
+        }
+
+
+        static void Maximize_Click(object sender, EventArgs e)
+        {
+            ResizeWindow();
+        }
+
+        static void ResizeWindow(bool Restore = true)
+        {
+            if (Restore)
+            {
+                RestoreMenu.Enabled = false;
+                HideMenu.Enabled = true;
+                SetParent(processHandle, WinDesktop);
+            }
+            else
+            {
+                RestoreMenu.Enabled = true;
+                HideMenu.Enabled = false;
+                SetParent(processHandle, WinShell);
+            }
+        }
     }
+
 }
+
 
 [Serializable]
 public class KeyList

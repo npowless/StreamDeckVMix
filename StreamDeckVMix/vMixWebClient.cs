@@ -116,7 +116,7 @@ namespace StreamDeckVMix
                 FirstUpdate = false;
                 return true;
             }
-            catch (Exception ex) { Console.WriteLine(ex); return false; }
+            catch (Exception ex) { /*Console.WriteLine(ex); */ return false; }
         }
 
         public bool GetGUID(string inputname, out string guid)
