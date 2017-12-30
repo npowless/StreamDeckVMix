@@ -36,6 +36,14 @@ namespace StreamDeckVMix
         [DllImport("user32.dll")]
         static extern IntPtr GetDesktopWindow();
 
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+        private const int SW_SHOWNORMAL = 1;
+        private const int SW_SHOWMINIMIZED = 2;
+        private const int SW_SHOWMAXIMIZED = 3;
+
+
         static NotifyIcon notifyIcon;
         static IntPtr processHandle;
         static IntPtr WinShell;
@@ -69,6 +77,8 @@ namespace StreamDeckVMix
             processHandle = Process.GetCurrentProcess().MainWindowHandle;
 
             WinShell = GetShellWindow();
+            ShowWindowAsync(WinShell, SW_SHOWMINIMIZED);
+
             WinDesktop = GetDesktopWindow();
             //Hide the Window
             ResizeWindow(false);
@@ -117,6 +127,9 @@ namespace StreamDeckVMix
                     //combined += thing.Name;
                     deck.SetKeyBitmap(KeyInit.Loc, StreamDeckKeyBitmap.FromFile(KeyInit.IconDisabled));
                 }
+
+                Console.WriteLine("Keys loaded, doing update...");
+
                 Boolean status = UpdateKeyStatus(deck, true);  //first update
                 if (status)
                 {
@@ -133,12 +146,14 @@ namespace StreamDeckVMix
                     Console.WriteLine("Connected to vMix.  Waiting for key input.");
                 }
 
+                //Console.WriteLine("keypress listen start");
                 deck.KeyPressed += Deck_KeyPressed; //listen for keypresses
 
                 while (true)
                 {
                     Thread.Sleep(2000);  //two second update to check for changes not triggered by a keypress
                     UpdateKeyStatus(deck);
+                    //Console.WriteLine("Update keys LOOP.");
                 }
             }
         }
@@ -152,16 +167,30 @@ namespace StreamDeckVMix
                 Console.WriteLine("vMix Connection Failed.");
                 return false;
             }
-            
+            //Console.WriteLine("UKS-1, Before Init");
             //first time, update key status
-            if (init)
+            if (init == true)
             {
-                var AK_Index = Keys.FindIndex(Keys => (Keys.Input == WebClient.ActiveInput) && (Keys.KeyType == KEY_OUTPUT));
-                var PK_Index = Keys.FindIndex(Keys => (Keys.Input == WebClient.PreviewInput) && (Keys.KeyType == KEY_PREVIEW));
-                d.SetKeyBitmap(Keys[AK_Index].Loc, StreamDeckKeyBitmap.FromFile(Keys[AK_Index].IconEnabled));
-                d.SetKeyBitmap(Keys[PK_Index].Loc, StreamDeckKeyBitmap.FromFile(Keys[PK_Index].IconEnabled));
+                if ((WebClient.ActiveInput > 4)) {
+                    Console.WriteLine("Current Active Input > 4");
+                    var PK_Index = Keys.FindIndex(Keys => (Keys.Input == WebClient.PreviewInput) && (Keys.KeyType == KEY_PREVIEW));
+                    d.SetKeyBitmap(Keys[PK_Index].Loc, StreamDeckKeyBitmap.FromFile(Keys[PK_Index].IconEnabled));
+                } else if (WebClient.PreviewInput > 4) {
+                    Console.WriteLine("Current Preview Input > 4");
+                    var AK_Index = Keys.FindIndex(Keys => (Keys.Input == WebClient.ActiveInput) && (Keys.KeyType == KEY_OUTPUT));
+                    d.SetKeyBitmap(Keys[AK_Index].Loc, StreamDeckKeyBitmap.FromFile(Keys[AK_Index].IconEnabled));
+                } else {
+                    try
+                    {
+                        var AK_Index = Keys.FindIndex(Keys => (Keys.Input == WebClient.ActiveInput) && (Keys.KeyType == KEY_OUTPUT));
+                        var PK_Index = Keys.FindIndex(Keys => (Keys.Input == WebClient.PreviewInput) && (Keys.KeyType == KEY_PREVIEW));
+                        d.SetKeyBitmap(Keys[AK_Index].Loc, StreamDeckKeyBitmap.FromFile(Keys[AK_Index].IconEnabled));
+                        d.SetKeyBitmap(Keys[PK_Index].Loc, StreamDeckKeyBitmap.FromFile(Keys[PK_Index].IconEnabled));
+                    }
+                    catch (Exception ex) { Console.WriteLine(ex); return false; }
+                }
             }
-
+            //Console.WriteLine("UKS-2, after INIT");
             //check overlay status
             foreach (OverlayStatus overlay in WebClient.OverlayStatus)
             {
@@ -182,25 +211,57 @@ namespace StreamDeckVMix
                 }
                 catch { }
             }
+            //Console.WriteLine("UKS-3, after Overlay");
             //update active
-           if (WebClient.ActiveChanged)
+            if (WebClient.ActiveChanged)
             {
-                var AK_Index = Keys.FindIndex(Keys => (Keys.Input == WebClient.ActiveInput) && (Keys.KeyType == KEY_OUTPUT));
-                var oAK_Index = Keys.FindIndex(Keys => (Keys.Input == WebClient.OldActive) && (Keys.KeyType == KEY_OUTPUT));
-                d.SetKeyBitmap(Keys[AK_Index].Loc, StreamDeckKeyBitmap.FromFile(Keys[AK_Index].IconEnabled));
-                d.SetKeyBitmap(Keys[oAK_Index].Loc, StreamDeckKeyBitmap.FromFile(Keys[oAK_Index].IconDisabled));
+                if ((WebClient.ActiveInput > 4))
+                {
+                    Console.WriteLine("Current Active Input > 4");
+                    if (WebClient.OldActive <= 4)
+                    {
+                        var oAK_Index = Keys.FindIndex(Keys => (Keys.Input == WebClient.OldActive) && (Keys.KeyType == KEY_OUTPUT));
+                        d.SetKeyBitmap(Keys[oAK_Index].Loc, StreamDeckKeyBitmap.FromFile(Keys[oAK_Index].IconDisabled));
+                    }
+                }
+                else
+                {
+                    if (WebClient.OldActive <= 4)
+                    {
+                        var oAK_Index = Keys.FindIndex(Keys => (Keys.Input == WebClient.OldActive) && (Keys.KeyType == KEY_OUTPUT));
+                        d.SetKeyBitmap(Keys[oAK_Index].Loc, StreamDeckKeyBitmap.FromFile(Keys[oAK_Index].IconDisabled));
+                    }
+                    var AK_Index = Keys.FindIndex(Keys => (Keys.Input == WebClient.ActiveInput) && (Keys.KeyType == KEY_OUTPUT));
+                    d.SetKeyBitmap(Keys[AK_Index].Loc, StreamDeckKeyBitmap.FromFile(Keys[AK_Index].IconEnabled));
+                }
                 WebClient.ActiveChanged = false;
             }
+            //Console.WriteLine("UKS-4, After Active");
             //update preview
             if (WebClient.PreviewChanged)
             {
-                var PK_Index = Keys.FindIndex(Keys => (Keys.Input == WebClient.PreviewInput) && (Keys.KeyType == KEY_PREVIEW));
-                var oPK_Index = Keys.FindIndex(Keys => (Keys.Input == WebClient.OldPreview) && (Keys.KeyType == KEY_PREVIEW));
-                d.SetKeyBitmap(Keys[PK_Index].Loc, StreamDeckKeyBitmap.FromFile(Keys[PK_Index].IconEnabled));
-                d.SetKeyBitmap(Keys[oPK_Index].Loc, StreamDeckKeyBitmap.FromFile(Keys[oPK_Index].IconDisabled));
+                if ((WebClient.PreviewInput > 4))
+                {
+                    Console.WriteLine("Current Preview Input > 4");
+                    if (WebClient.OldPreview <= 4)
+                    {
+                        var oPK_Index = Keys.FindIndex(Keys => (Keys.Input == WebClient.OldPreview) && (Keys.KeyType == KEY_PREVIEW));
+                        d.SetKeyBitmap(Keys[oPK_Index].Loc, StreamDeckKeyBitmap.FromFile(Keys[oPK_Index].IconDisabled));
+                    }
+                }
+                else
+                {
+                    if (WebClient.OldPreview <= 4)
+                    {
+                        var oPK_Index = Keys.FindIndex(Keys => (Keys.Input == WebClient.OldPreview) && (Keys.KeyType == KEY_PREVIEW));
+                        d.SetKeyBitmap(Keys[oPK_Index].Loc, StreamDeckKeyBitmap.FromFile(Keys[oPK_Index].IconDisabled));
+                    }
+                    var PK_Index = Keys.FindIndex(Keys => (Keys.Input == WebClient.PreviewInput) && (Keys.KeyType == KEY_PREVIEW));
+                    d.SetKeyBitmap(Keys[PK_Index].Loc, StreamDeckKeyBitmap.FromFile(Keys[PK_Index].IconEnabled));
+                }
                 WebClient.PreviewChanged = false;
             }
-            
+            //Console.WriteLine("UKS-5, After Preview");
             //update recording status
             var RecordKey_Index = Keys.FindIndex(Keys => Keys.KeyType == KEY_RECORD);
             if (WebClient.Recording)
@@ -211,7 +272,7 @@ namespace StreamDeckVMix
             {
                 d.SetKeyBitmap(Keys[RecordKey_Index].Loc, StreamDeckKeyBitmap.FromFile(Keys[RecordKey_Index].IconDisabled));
             }
-
+            //Console.WriteLine("UKS-6, After Recording Status");
             //update streaming status
             var StreamKey_Index = Keys.FindIndex(Keys => Keys.KeyType == KEY_STREAM);
             if (WebClient.Streaming)
@@ -222,6 +283,7 @@ namespace StreamDeckVMix
             {
                 d.SetKeyBitmap(Keys[StreamKey_Index].Loc, StreamDeckKeyBitmap.FromFile(Keys[StreamKey_Index].IconDisabled));
             }
+            //Console.WriteLine("UKS-6, After Streaming Status - DONE");
             return true;
         }
 
@@ -256,27 +318,27 @@ namespace StreamDeckVMix
                         {
                             WebClient.ToggleOverlay(Keys[CK_Index].Input, false);
                         }          
-                        Thread.Sleep(1000);  //add sleep to give time for vmix to return proper status
+                        Thread.Sleep(750);  //add sleep to give time for vmix to return proper status
                         UpdateKeyStatus(d);
                         break;
                     case KEY_RECORD:
                         WebClient.ToggleRecord();
-                        Thread.Sleep(1000);  //add sleep to give time for vmix to return proper status
+                        Thread.Sleep(750);  //add sleep to give time for vmix to return proper status
                         UpdateKeyStatus(d);
                         break;
                     case KEY_STREAM:
                         WebClient.ToggleStreaming();
-                        Thread.Sleep(1000);  //add sleep to give time for vmix to return proper status
+                        Thread.Sleep(7500);  //add sleep to give time for vmix to return proper status
                         UpdateKeyStatus(d);
                         break;
                     case KEY_CUT:
                         WebClient.Transition("Cut");
-                        Thread.Sleep(1000);  //add sleep to give time for vmix to return proper status
+                        Thread.Sleep(750);  //add sleep to give time for vmix to return proper status
                         UpdateKeyStatus(d);
                         break;
                     case KEY_QUICKPLAY:
                         WebClient.Transition("QuickPlay");
-                        Thread.Sleep(1000);  //add sleep to give time for vmix to return proper status
+                        Thread.Sleep(750);  //add sleep to give time for vmix to return proper status
                         UpdateKeyStatus(d);
                         break;
 
@@ -301,7 +363,19 @@ namespace StreamDeckVMix
             Environment.Exit(1);
         }
 
-
+        private static void MinimizeWindow(object sender, EventArgs e)
+        {
+            // retrieve Notepad main window handle
+            //IntPtr hWnd = FindWindow("StreamDeckVMix");
+            //if (!hWnd.Equals(IntPtr.Zero))
+            //{
+                // SW_SHOWMAXIMIZED to maximize the window
+                // SW_SHOWMINIMIZED to minimize the window
+                // SW_SHOWNORMAL to make the window be normal size
+                //ShowWindowAsync(hWnd, SW_SHOWMINIMIZED);
+            ShowWindowAsync(WinShell, SW_SHOWMINIMIZED);
+            // }
+        }
         static void Minimize_Click(object sender, EventArgs e)
         {
             ResizeWindow(false);
@@ -315,7 +389,7 @@ namespace StreamDeckVMix
 
         static void ResizeWindow(bool Restore = true)
         {
-            if (Restore)
+            if (Restore == true)
             {
                 RestoreMenu.Enabled = false;
                 HideMenu.Enabled = true;
